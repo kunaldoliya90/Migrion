@@ -1,0 +1,18 @@
+#!/bin/sh
+# Enabled by scripts/db.sh (git config core.hooksPath .githooks).
+# Nothing is committed on the default branch - every change goes through a
+# branch and a pull request. The very first commit of a new repo is allowed.
+git rev-parse -q --verify HEAD >/dev/null || exit 0
+
+branch=$(git symbolic-ref -q --short HEAD)
+default=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)
+default=${default#origin/}
+
+case "$branch" in
+  main|master|"$default")
+    echo "✗ Commits on '$branch' are not allowed. Start a branch first:"
+    echo "    make db-branch NAME=<database> CHANGE=<what-changes>"
+    echo "  (or for non-database work: git switch -c <feat|fix|chore|docs>/<what-changes>)"
+    exit 1
+    ;;
+esac
