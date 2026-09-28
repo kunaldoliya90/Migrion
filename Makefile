@@ -1,19 +1,25 @@
-# Every database command. Without make, run: bash scripts/db.sh <command>
 .PHONY: setup db-branch db-new db-check db-migration db-migrate db-status db-migrate-prod
 
-setup:            ## first run: create .env, enable the git hook, start local Postgres
+setup:
 	@bash scripts/db.sh setup
-db-branch:        ## make db-branch NAME=user_auth CHANGE=add-phone
+
+db-branch:
 	@bash scripts/db.sh branch $(NAME) $(CHANGE)
-db-new:           ## make db-new NAME=billing
+
+db-new:
 	@bash scripts/db.sh new $(NAME)
-db-check:         ## check naming and schema conventions
+
+db-check:
 	@bash scripts/db.sh check
-db-migration:     ## generate migrations from schema.hcl changes
+
+db-migration:
 	@bash scripts/db.sh migration
-db-migrate:       ## apply pending migrations to your local databases
+
+db-migrate:
 	@bash scripts/db.sh migrate
-db-status:        ## applied / pending migrations per local database
+
+db-status:
 	@bash scripts/db.sh status
-db-migrate-prod:  ## apply pending migrations to production (CD only)
+
+db-migrate-prod:
 	@bash scripts/db.sh migrate-prod

@@ -1,9 +1,3 @@
-// One environment for every database. scripts/db.sh runs it once per folder
-// under database/, passing the folder name as `name`.
-//   schema.hcl         what the database should look like
-//   migrations/        the generated history
-//   <NAME>_DATABASE_URL where the database is (.env locally, secrets in CD)
-
 variable "name" {
   type = string
 }

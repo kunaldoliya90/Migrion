@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# The guardrail: one way to name and shape every database. Prints one FAIL
-# line per problem (with file and line) and exits 1 if there are any.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -23,7 +21,6 @@ for dir in database/*/; do
       fail "$f: only Atlas-generated migrations belong in migrations/"
   done
 
-  # Schema rules, checked per table and column.
   [ -f "$dir/schema.hcl" ] && awk -v file="$dir/schema.hcl" '
     function fail(n, msg) { printf "FAIL %s:%d: %s\n", file, n, msg; bad = 1 }
     function name(s) { sub(/^[^"]*"/, "", s); sub(/".*$/, "", s); return s }
@@ -67,7 +64,6 @@ for dir in database/*/; do
   ' "$dir/schema.hcl" || failed=1
 done
 
-# No other tool may own migrations.
 others=$(find . \( -name .git -o -name node_modules -o -path ./database \) -prune -o \
   \( -path '*/prisma/migrations/*' -o -name alembic.ini -o -path '*/migrations/*.sql' -o -path '*/migrations/0*.py' \) -type f -print)
 [ -z "$others" ] || fail "migrations outside database/: $others"

@@ -1,8 +1,5 @@
 name: CI
 
-# Checks every pull request before it can reach main.
-# Make "verify" a required check in the branch protection for main.
-
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]

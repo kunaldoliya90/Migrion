@@ -1,7 +1,4 @@
 #!/bin/sh
-# Enabled by scripts/db.sh (git config core.hooksPath .githooks).
-# Nothing is committed on the default branch - every change goes through a
-# branch and a pull request. The very first commit of a new repo is allowed.
 git rev-parse -q --verify HEAD >/dev/null || exit 0
 
 branch=$(git symbolic-ref -q --short HEAD)
