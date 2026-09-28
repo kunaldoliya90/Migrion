@@ -1,0 +1,33 @@
+name: CD
+
+# Migrates production when a change reaches main. Each database's connection
+# string is a secret named <NAME>_DATABASE_URL on the GitHub Environment
+# "production" (add required reviewers there to approve each run by hand).
+
+on:
+  push:
+    branches: [main]
+    paths: ["database/**"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load the *_DATABASE_URL secrets
+        env:
+          SECRETS: ${{ toJSON(secrets) }}
+        run: jq -r 'to_entries[] | select(.key | endswith("_DATABASE_URL")) | "\(.key)=\(.value)"' <<< "$SECRETS" >> "$GITHUB_ENV"
+
+      - name: Migrate production
+        run: make db-migrate-prod

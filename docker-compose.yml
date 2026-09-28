@@ -1,23 +1,28 @@
-# Nothing gets installed on your machine: Postgres and Atlas run as containers
-# here (and GitHub Actions runs the same containers in CI).
-#   postgres   local databases for your services - scripts/db.sh starts it
+# Everything runs in Docker - there's nothing else to install.
+#   postgres   your local databases (localhost:5432 from your machine)
 #   atlas      the Atlas CLI, run by scripts/db.sh
-#   atlas-dev  empty throwaway Postgres Atlas uses to compute migrations
+#   atlas-dev  an empty Postgres Atlas uses as scratch space to compute migrations
 services:
   postgres:
-    image: postgres:${POSTGRES_VERSION:-16}
+    image: postgres:16
     environment:
-      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck: &pg_ready
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 2s
-      timeout: 5s
+    healthcheck: &ready
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 1s
       retries: 30
+
+  atlas-dev:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck: *ready
 
   atlas:
     image: arigaio/atlas:1.3.3-community
@@ -28,17 +33,9 @@ services:
     working_dir: /work
     volumes:
       - .:/work
-    extra_hosts:
-      - host.docker.internal:host-gateway
-
-  atlas-dev:
-    image: postgres:${POSTGRES_VERSION:-16}
-    profiles: [tools]
-    environment:
-      POSTGRES_PASSWORD: postgres
-    tmpfs:
-      - /var/lib/postgresql/data
-    healthcheck: *pg_ready
+    depends_on:
+      atlas-dev:
+        condition: service_healthy
 
 volumes:
   postgres_data:
