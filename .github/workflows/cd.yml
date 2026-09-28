@@ -1,9 +1,5 @@
 name: CD
 
-# Migrates production when a change reaches main. Each database's connection
-# string is a secret named <NAME>_DATABASE_URL on the GitHub Environment
-# "production" (add required reviewers there to approve each run by hand).
-
 on:
   push:
     branches: [main]

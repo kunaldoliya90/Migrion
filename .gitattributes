@@ -1,4 +1,1 @@
-# Atlas checksums migration files byte-for-byte (atlas.sum) and bash can't run
-# CRLF scripts, so everything stays LF on every OS - including Windows with
-# core.autocrlf=true.
 * text=auto eol=lf

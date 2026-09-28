@@ -1,7 +1,3 @@
-# Everything runs in Docker - there's nothing else to install.
-#   postgres   your local databases (localhost:5432 from your machine)
-#   atlas      the Atlas CLI, run by scripts/db.sh
-#   atlas-dev  an empty Postgres Atlas uses as scratch space to compute migrations
 services:
   postgres:
     image: postgres:16

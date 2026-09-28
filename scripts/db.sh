@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# Every database command. `make <target>` calls this; without make, run
-# `bash scripts/db.sh <command>` instead. Atlas runs in Docker.
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-# Files Atlas writes should belong to you, not root.
 if [ "$(uname)" = Linux ]; then
   HOST_UID=$(id -u)
   HOST_GID=$(id -g)
@@ -21,7 +18,6 @@ databases() {
 
 url_var() { echo "$(echo "$1" | tr '[:lower:]' '[:upper:]')_DATABASE_URL"; }
 
-# Local connection strings. Never used for production, whose come from CD secrets.
 load_local_env() {
   [ -f .env ] || cp .env.example .env
   set -a
@@ -30,7 +26,6 @@ load_local_env() {
   set +a
 }
 
-# atlas <database> <atlas args...>
 atlas() {
   local db=$1
   shift
@@ -60,7 +55,7 @@ cmd_new() {
   [ ! -e "database/$db" ] || { echo "database/$db already exists."; exit 1; }
   load_local_env
   mkdir -p "database/$db/migrations"
-  touch "database/$db/migrations/.gitkeep"   # git doesn't keep empty folders
+  touch "database/$db/migrations/.gitkeep"
   echo 'schema "public" {}' > "database/$db/schema.hcl"
   line="$(url_var "$db")=\"postgres://postgres:postgres@postgres:5432/$db?sslmode=disable\""
   echo "$line" >> .env.example
@@ -75,7 +70,6 @@ cmd_migration() {
   docker compose up -d --wait atlas-dev
   for db in $(databases); do
     echo "==> $db"
-    # A fresh, empty scratch database every time.
     docker compose exec -T -e PGOPTIONS="-c client_min_messages=warning" atlas-dev psql -U postgres -q \
       -c "DROP DATABASE IF EXISTS \"$db\"" -c "CREATE DATABASE \"$db\""
     atlas "$db" migrate diff changes
