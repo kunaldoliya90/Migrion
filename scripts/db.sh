@@ -3,15 +3,15 @@
 # Atlas is never installed on a machine: it runs in Docker (docker-compose.yml)
 # when Docker is available, and in GitHub Actions otherwise.
 #
-#   bash scripts/db.sh doctor    [env]            check setup (fixes what's safe)
+#   bash scripts/db.sh doctor                     check setup (fixes what's safe)
 #   bash scripts/db.sh branch    <name> <change>  start db/<name>/<change> from the latest main
 #   bash scripts/db.sh check                      guardrail: enforce the repo's conventions
 #   bash scripts/db.sh new       <name>           scaffold database/<name>/
-#   bash scripts/db.sh new-env   <env>            scaffold .env.<env> for another environment
 #   bash scripts/db.sh migration                  generate migrations from schema.hcl changes (Docker)
 #   bash scripts/db.sh sync                       push, let CI generate migrations, pull them (no Docker)
-#   bash scripts/db.sh migrate   [env]            apply pending migrations (default: local)
-#   bash scripts/db.sh status    [env]            applied/pending migrations per database
+#   bash scripts/db.sh migrate                    apply pending migrations to local databases (Docker)
+#   bash scripts/db.sh migrate-prod               apply pending migrations to production (CI only)
+#   bash scripts/db.sh status                     applied/pending migrations per local database (Docker)
 #   bash scripts/db.sh verify    [base]           CI checks: conventions, branch, history, sync
 set -u
 
@@ -47,7 +47,6 @@ services() {
 
 url_var()  { printf '%s_DATABASE_URL' "$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"; }
 url_of()   { local v; v=$(url_var "$1"); printf '%s' "${!v:-}"; }
-env_file() { if [ "$1" = local ]; then echo .env; else echo ".env.$1"; fi; }
 count_sql() {
   local n=0 f
   for f in database/"$1"/migrations/*.sql; do [ -e "$f" ] && n=$((n + 1)); done
@@ -96,21 +95,18 @@ enable_hooks() {
 }
 
 # --- environment ------------------------------------------------------------
+# Two environments only: local (connection strings in .env) and production
+# (connection strings only ever come from CI secrets; never read from a file).
 
 load_env() {
-  local env=$1 file line key val
-  [[ "$env" =~ ^[a-z][a-z0-9_-]*$ ]] || die "Invalid environment name '$env' - use lowercase letters, digits, '-' or '_'."
-  file=$(env_file "$env")
-  if [ "$env" = local ] && [ ! -f .env ] && [ -f .env.example ]; then
+  local line key val
+  if [ ! -f .env ] && [ -f .env.example ]; then
     cp .env.example .env
     ok "Created .env from .env.example"
   fi
-  if [ ! -f "$file" ]; then
-    [ "$env" = local ] || ok "No $file - using variables already in the environment (e.g. CI secrets)"
-    return 0
-  fi
+  [ -f .env ] || return 0
   # Parsed rather than sourced, so '&' or spaces in a URL can't run as shell.
-  # Values already set in the shell or CI take precedence over the file.
+  # Values already set in the shell take precedence over the file.
   while IFS= read -r line || [ -n "$line" ]; do
     line=${line%$'\r'}
     case "$line" in ''|'#'*) continue ;; *=*) ;; *) continue ;; esac
@@ -120,15 +116,8 @@ load_env() {
     [ -n "${!key:-}" ] && continue
     val=${val%\"}; val=${val#\"}; val=${val%\'}; val=${val#\'}
     export "$key=$val"
-  done < "$file"
-  ok "Loaded $file"
-}
-
-guard_remote() {
-  [ "$1" = local ] && return 0
-  [ "${CI:-}" = true ] && return 0
-  [ "${DB_CONFIRM:-}" = "$1" ] && return 0
-  die "Refusing to migrate '$1' from a workstation. Prefer CI; if you really mean it, re-run with DB_CONFIRM=$1."
+  done < .env
+  ok "Loaded .env"
 }
 
 # --- docker / atlas ---------------------------------------------------------
@@ -189,7 +178,7 @@ atlas_run() {
 }
 
 # Local only: start the compose Postgres if needed and create the service's
-# database if it doesn't exist yet. Never used for other environments.
+# database if it doesn't exist yet. Never used for production.
 ensure_local_db() {
   local url=$1 rest host db running exists
   rest=${url#*://}; rest=${rest#*@}
@@ -372,33 +361,9 @@ cmd_new() {
   append_line .env.example "$line"
   ok ".env.example: $var"
   if [ -f .env ] && ! grep -q "^$var=" .env; then append_line .env "$line"; ok ".env: $var"; fi
-  for f in .env.*; do
-    [ -f "$f" ] && [ "$f" != .env.example ] || continue
-    grep -q "^$var=" "$f" && continue
-    append_line "$f" "$var="
-    warn "$f: added an empty $var - fill it in before migrating that environment"
-  done
   echo
   echo "  Next: add tables to database/$name/schema.hcl, then make db-migration (or make db-sync without Docker)"
-  echo "  CI:   add a $var secret to every GitHub Environment you deploy to"
-}
-
-cmd_new_env() {
-  local env=${1:-} s
-  { [ -n "$env" ] && [ "$env" != local ]; } || die "Usage: make db-new-env ENV=<name>   (e.g. staging)"
-  [[ "$env" =~ ^[a-z][a-z0-9_-]*$ ]] || die "Invalid environment name '$env' - use lowercase letters, digits, '-' or '_'."
-  [ ! -e ".env.$env" ] || die ".env.$env already exists."
-
-  step "Creating environment '$env'"
-  {
-    echo "# Connection strings for the '$env' environment. Gitignored - never commit it."
-    echo "# In CI, set the same names as secrets on the GitHub Environment '$env'."
-    for s in $(services); do echo "$(url_var "$s")="; done
-  } > ".env.$env"
-  ok ".env.$env"
-  echo
-  echo "  Next: fill in each URL, then make db-doctor ENV=$env"
-  echo "  CI:   create the GitHub Environment '$env' and add each *_DATABASE_URL as a secret"
+  echo "  CI:   add a $var secret to the GitHub Environment 'production'"
 }
 
 cmd_migration() {
@@ -407,7 +372,7 @@ cmd_migration() {
   cmd_check || exit 1
   have_docker || no_docker "Commit your schema.hcl change, then run make db-sync: it pushes the branch, CI generates the migration and commits it back, and it's pulled here."
   step "Preparing"
-  load_env local
+  load_env
   prepare_docker
   names=$(services)
   [ -n "$names" ] || { ok "No databases yet - create one with: make db-new NAME=<name>"; return 0; }
@@ -471,25 +436,33 @@ cmd_sync() {
 }
 
 cmd_migrate() {
-  local env=$1 names s out rc n missing="" failed="" summary=""
   cmd_check || exit 1
-  step "Preparing '$env'"
-  guard_remote "$env"
-  if ! have_docker; then
-    [ "$env" = local ] &&
-      no_docker "Without Docker there's no local database. Shared environments are migrated by CI: merging to main migrates DB_PUSH_ENVIRONMENT, and the workflow can be run by hand for any environment."
-    no_docker "Run it in CI: Actions > Database Migration > Run workflow > $env  (or: gh workflow run database-migration.yml -f environment=$env)"
-  fi
-  load_env "$env"
+  have_docker || no_docker "Without Docker there's no local database. Production is migrated by CI when a change reaches main."
+  step "Preparing local"
+  load_env
   prepare_docker
+  apply_all local
+}
+
+cmd_migrate_prod() {
+  cmd_check || exit 1
+  [ "${CI:-}" = true ] || die "Production is migrated only by CI, when a change reaches main - never from a workstation."
+  step "Preparing production"
+  prepare_docker
+  apply_all production
+}
+
+apply_all() {
+  local env=$1 names s out rc n missing="" failed="" summary="" where
   names=$(services)
   [ -n "$names" ] || { ok "No databases yet - create one with: make db-new NAME=<name>"; return 0; }
   for s in $names; do
     [ -n "$(url_of "$s")" ] || missing="$missing $(url_var "$s")"
   done
-  [ -z "$missing" ] || die "Not set for '$env':$missing - add to $(env_file "$env") (or as secrets on the GitHub Environment '$env')."
+  if [ "$env" = local ]; then where=".env"; else where="the secrets of the GitHub Environment 'production'"; fi
+  [ -z "$missing" ] || die "Not set:$missing - add to $where."
 
-  step "Applying migrations to '$env'"
+  step "Applying migrations ($env)"
   for s in $names; do
     if [ -n "$failed" ]; then
       summary+=$(printf '  %-24s %s' "$s" "not run")$'\n'
@@ -513,23 +486,22 @@ cmd_migrate() {
     fi
   done
 
-  step "Summary ('$env')"
+  step "Summary ($env)"
   printf '%s' "$summary"
-  [ -z "$failed" ] || die "'$failed' failed on '$env'; databases after it were not touched. Fix the error above and re-run - applied migrations are skipped automatically."
-  ok "Every database on '$env' is up to date"
+  [ -z "$failed" ] || die "'$failed' failed ($env); databases after it were not touched. Fix the error above and re-run - applied migrations are skipped automatically."
+  ok "Every $env database is up to date"
 }
 
 cmd_status() {
-  local env=$1 names s out rc bad=0 state current pending hint=""
-  have_docker || no_docker "Status is visible in CI: every migrate run prints a per-database summary (repo Actions tab)."
-  step "Preparing '$env'"
-  load_env "$env"
+  local names s out rc bad=0 state current pending
+  have_docker || no_docker "Production status is in CI: every migrate run prints a per-database summary (repo Actions tab)."
+  step "Preparing local"
+  load_env
   prepare_docker
   names=$(services)
   [ -n "$names" ] || { ok "No databases yet"; return 0; }
-  [ "$env" = local ] || hint=" ENV=$env"
 
-  step "Migration status on '$env'"
+  step "Migration status (local)"
   for s in $names; do
     if [ -z "$(url_of "$s")" ]; then err "$s: $(url_var "$s") is not set"; bad=1; continue; fi
     out=$(atlas_run "$s" unused migrate status 2>&1); rc=$?
@@ -540,14 +512,14 @@ cmd_status() {
     if [ "$state" = OK ]; then
       ok "$s: up to date (version $current)"
     else
-      warn "$s: $pending pending (current: $current) - run make db-migrate$hint"
+      warn "$s: $pending pending (current: $current) - run make db-migrate"
     fi
   done
   return $bad
 }
 
 cmd_doctor() {
-  local env=$1 problems=0 names s out cur
+  local problems=0 names s out cur
   step "Tools"
   ok "bash $BASH_VERSION"
   if command -v git >/dev/null 2>&1; then ok "$(git --version)"; else die "git is required."; fi
@@ -558,7 +530,7 @@ cmd_doctor() {
   elif command -v docker >/dev/null 2>&1; then
     warn "Docker is installed but not running - start it to work locally, or let CI do it (make db-sync)"
   else
-    ok "No Docker - fine: CI generates migrations (make db-sync) and applies them to your environments"
+    ok "No Docker - fine: CI generates migrations (make db-sync) and migrates production"
   fi
 
   step "Repository"
@@ -571,21 +543,21 @@ cmd_doctor() {
     warn "Not a git repository"
   fi
 
-  step "Configuration ('$env')"
-  load_env "$env"
+  step "Configuration"
+  load_env
   names=$(services)
   if [ -n "$names" ]; then ok "Databases: $(echo $names)"; else ok "No databases yet - create one with: make db-new NAME=<name>"; fi
   cmd_check || problems=$((problems + 1))
 
   if [ -n "$names" ] && have_docker; then
-    step "Connectivity ('$env')"
+    step "Connectivity (local)"
     for s in $names; do
       if [ -z "$(url_of "$s")" ]; then
-        err "$s: $(url_var "$s") is not set in $(env_file "$env")"
+        err "$s: $(url_var "$s") is not set in .env"
         problems=$((problems + 1))
         continue
       fi
-      [ "$env" = local ] && ensure_local_db "$(url_of "$s")"
+      ensure_local_db "$(url_of "$s")"
       if out=$(atlas_run "$s" unused migrate status 2>&1); then
         ok "$s: reachable ($(sed -n 's/^Migration Status: *//p' <<<"$out"))"
       else
@@ -649,7 +621,7 @@ cmd_verify() {
 
   step "Checking schema.hcl and migrations are in sync"
   have_docker || no_docker "This check runs in CI on every pull request."
-  load_env local
+  load_env
   prepare_docker
   names=$(services)
   [ -n "$names" ] || { ok "No databases yet"; return 0; }
@@ -671,15 +643,15 @@ cmd_verify() {
 }
 
 case "${1:-}" in
-  doctor)    cmd_doctor "${2:-local}" ;;
-  branch)    cmd_branch "${2:-}" "${3:-}" ;;
-  check)     cmd_check ;;
-  new)       cmd_new "${2:-}" ;;
-  new-env)   cmd_new_env "${2:-}" ;;
-  migration) cmd_migration ;;
-  sync)      cmd_sync ;;
-  migrate)   cmd_migrate "${2:-local}" ;;
-  status)    cmd_status "${2:-local}" ;;
-  verify)    cmd_verify "${2:-}" ;;
+  doctor)       cmd_doctor ;;
+  branch)       cmd_branch "${2:-}" "${3:-}" ;;
+  check)        cmd_check ;;
+  new)          cmd_new "${2:-}" ;;
+  migration)    cmd_migration ;;
+  sync)         cmd_sync ;;
+  migrate)      cmd_migrate ;;
+  migrate-prod) cmd_migrate_prod ;;
+  status)       cmd_status ;;
+  verify)       cmd_verify "${2:-}" ;;
   *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
