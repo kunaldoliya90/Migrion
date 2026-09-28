@@ -1,0 +1,41 @@
+name: CI
+
+# Checks every pull request before it can reach main.
+# Make "verify" a required check in the branch protection for main.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      BASE: origin/${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Conventions
+        run: make db-check
+
+      - name: Committed migrations are never edited
+        run: |
+          changed=$(git diff --name-only --diff-filter=MDR "$BASE"...HEAD -- 'database/*/migrations/*.sql')
+          [ -z "$changed" ] || { echo "::error::Committed migrations were edited: $changed - add a new migration instead"; exit 1; }
+
+      - name: Migrations match schema.hcl
+        run: |
+          make db-migration
+          [ -z "$(git status --porcelain database)" ] || { git status --short database; echo "::error::schema.hcl changed without a migration - run make db-migration and commit it"; exit 1; }
+
+      - name: Destructive migrations need the allow-destructive-migration label
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'allow-destructive-migration') }}
+        run: |
+          added=$(git diff --name-only --diff-filter=A "$BASE"...HEAD -- 'database/*/migrations/*.sql')
+          [ -z "$added" ] || ! grep -inE 'DROP (TABLE|COLUMN|INDEX|CONSTRAINT)|TRUNCATE|ALTER COLUMN .* TYPE' $added ||
+            { echo "::error::Destructive migration above - review it, then add the label allow-destructive-migration"; exit 1; }
