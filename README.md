@@ -60,16 +60,15 @@ runs once per directory, reading the connection from `<NAME>_DATABASE_URL`.
 
 | Command | Needs Docker | What it does |
 |---|---|---|
-| `make db-doctor [ENV=x]` | no | Checks tools, repo, conventions and connectivity, and fixes what's safe: creates `.env`, enables the git hook, starts the local Postgres, creates local databases. |
+| `make db-doctor` | no | Checks tools, repo, conventions and connectivity, and fixes what's safe: creates `.env`, enables the git hook, starts the local Postgres, creates local databases. |
 | `make db-branch NAME=x CHANGE=y` | no | Updates `main` from origin and creates `db/x/y`. |
-| `make db-new NAME=x` | no | Scaffolds `database/x/` and adds `X_DATABASE_URL` to `.env.example`, `.env` and every `.env.<env>`. |
+| `make db-new NAME=x` | no | Scaffolds `database/x/` and adds `X_DATABASE_URL` to `.env.example` and `.env`. |
 | `make db-migration` | yes | Generates migrations for changed schemas, and flags destructive statements. |
 | `make db-sync` | no | Pushes the branch, waits for CI to commit the generated migrations, and pulls them. |
-| `make db-migrate [ENV=x]` | yes | Applies pending migrations (default `local`). |
-| `make db-migrate-prod` | yes | Same as `make db-migrate ENV=production`. |
-| `make db-status [ENV=x]` | yes | Applied and pending migrations per database. |
-| `make db-new-env ENV=x` | no | Scaffolds `.env.x` for a new environment. |
+| `make db-migrate` | yes | Applies pending migrations to your local databases. |
+| `make db-status` | yes | Applied and pending migrations per local database. |
 | `make db-check` | no | The guardrail (see Conventions). Runs automatically. |
+| `make db-migrate-prod` | - | Applies pending migrations to production. CI only; refuses to run anywhere else. |
 | `make db-verify [BASE=ref]` | yes | What CI runs on every PR. |
 
 Output marks each result ✓ (ok), ! (warning) or ✗ (failed). Exit code 3 means
@@ -95,17 +94,16 @@ Also protect `main` on GitHub: require a pull request, and require the
 
 ## Environments
 
-Environments are just names: `local`, `develop`, `staging`, `production`, or
-anything else. Every environment uses the same variable names, one
+There are two, and both use the same variable names, one
 `<NAME>_DATABASE_URL` per database:
 
-- **Locally:** `.env` for `local`, and `.env.<env>` for anything else (create
-  it with `make db-new-env ENV=staging`). All of these are gitignored.
-- **CI:** secrets on the matching GitHub Environment.
+| Environment | Where the URLs live | Who migrates it |
+|---|---|---|
+| **local** | `.env` (gitignored, created from `.env.example`) | you: `make db-migrate` (Docker) |
+| **production** | secrets on the GitHub Environment `production` | CI only, when a change reaches `main` |
 
-Adding an environment needs no code change. Migrating anything other than
-`local` from a workstation is refused unless you set `DB_CONFIRM=<env>`;
-normally CI does it.
+Production is never migrated from a workstation, and its credentials never
+touch a file in the repo.
 
 ## CI
 
@@ -115,27 +113,25 @@ normally CI does it.
   migrations for any `schema.hcl` change and commits them back to the branch
   as `db: generate migrations`, which is what makes the no-Docker workflow
   work.
-- **verify** runs on every PR, and before every migrate. It checks:
+- **verify** runs on every PR, and before every production migrate. It
+  checks:
   - the branch name, and that the branch changes only one database;
   - conventions (the guardrail);
   - that no committed migration was edited, renamed or deleted;
   - that every `schema.hcl` matches its migrations;
   - that any destructive migration has been approved with the PR label
     `allow-destructive-migration`.
-- **migrate** runs on push to `main` and applies to the environment named by
-  the repo variable `DB_PUSH_ENVIRONMENT` (default `production`). You can
-  also run it by hand from the Actions tab, on `main`, for any environment.
-  It loads every `*_DATABASE_URL` secret from that GitHub Environment
-  automatically, so adding a database never means editing the workflow.
+- **migrate-production** runs on push to `main`. To re-run it, use the
+  Actions tab (*Run workflow* on `main`). It loads every `*_DATABASE_URL`
+  secret from the GitHub Environment `production` automatically, so adding a
+  database never means editing the workflow.
 
 Recommended repo setup:
 
-- A GitHub Environment per target, with each database's `<NAME>_DATABASE_URL`
-  as a secret.
-- Required reviewers on `production`.
+- A GitHub Environment named `production`, with each database's
+  `<NAME>_DATABASE_URL` as a secret, and required reviewers if you want a
+  manual approval before each production migration.
 - Branch protection on `main`, as above.
-- For a staging-first flow, set `DB_PUSH_ENVIRONMENT=staging`, then promote
-  by running the workflow manually for `production`.
 
 ## Without Docker
 
@@ -144,10 +140,9 @@ Nothing changes except where Atlas runs:
 - `make db-sync` pushes your branch; the `generate` job creates the migration
   and commits it back, and `db-sync` pulls it.
 - PR checks run in CI as usual.
-- Merging migrates your environments.
+- Merging migrates production.
 
-There is no local database without Docker. Point your services at a shared
-`develop` environment instead.
+There is no local database without Docker.
 
 ## Conventions (enforced)
 

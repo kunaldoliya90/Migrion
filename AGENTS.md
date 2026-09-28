@@ -8,9 +8,8 @@ architecture is described in `README.md`.
 
 For **any** request about databases, however it's phrased - creating one;
 changing tables, columns or indexes; generating or applying migrations;
-checking status; adding an environment such as staging or production; or
-setting the repo up - read `.vibe-code/database-change.md` and follow it
-step by step. Don't improvise a different workflow.
+checking status; or setting the repo up - read `.vibe-code/database-change.md`
+and follow it step by step. Don't improvise a different workflow.
 
 The user should never have to run a command or edit a file. You do it, and
 you stop for their approval only at the checkpoints the playbook defines.
@@ -26,6 +25,6 @@ you stop for their approval only at the checkpoints the playbook defines.
   hand-written or edited.
 - `make db-check` is the guardrail. Fix what it reports; never bypass, disable
   or edit it to make it pass.
-- Never migrate a non-local environment unless the user explicitly asked for
-  that environment.
-- Never commit `.env`, `.env.<env>`, or any credential.
+- There are two environments: `local` and `production`. Production is
+  migrated only by CI when a change reaches `main`, never from a workstation.
+- Never commit `.env` or any credential.

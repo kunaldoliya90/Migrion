@@ -16,8 +16,8 @@ branch:
 ```bash
 make db-branch NAME=<name> CHANGE=<what-changes>
 make db-migration   # generate migrations (Docker), or: make db-sync (CI does it)
-make db-migrate     # apply locally (Docker)
+make db-migrate     # apply to your local databases (Docker); production is migrated by CI
 ```
 
-See [README.md](../README.md) for branches, environments, CI, conventions
+See [README.md](../README.md) for branches, local vs production, CI, conventions
 and safety rules.

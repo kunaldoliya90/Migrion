@@ -36,15 +36,19 @@ same thing.
 
 | make | without make | does |
 |---|---|---|
-| `make db-doctor [ENV=x]` | `bash scripts/db.sh doctor [x]` | checks and fixes setup |
+| `make db-doctor` | `bash scripts/db.sh doctor` | checks and fixes setup |
 | `make db-branch NAME=x CHANGE=y` | `bash scripts/db.sh branch x y` | updates `main` from origin and creates `db/x/y` |
 | `make db-new NAME=x` | `bash scripts/db.sh new x` | scaffolds `database/x/` and registers its URL |
 | `make db-migration` | `bash scripts/db.sh migration` | generates migrations (**Docker**) |
 | `make db-sync` | `bash scripts/db.sh sync` | pushes the branch, waits for CI to commit the generated migration, pulls it (**no Docker**) |
-| `make db-migrate [ENV=x]` | `bash scripts/db.sh migrate [x]` | applies pending migrations (**Docker**) |
-| `make db-status [ENV=x]` | `bash scripts/db.sh status [x]` | applied / pending per database (**Docker**) |
-| `make db-new-env ENV=x` | `bash scripts/db.sh new-env x` | scaffolds `.env.x` for a new environment |
+| `make db-migrate` | `bash scripts/db.sh migrate` | applies pending migrations to local databases (**Docker**) |
+| `make db-status` | `bash scripts/db.sh status` | applied / pending per local database (**Docker**) |
 | `make db-check` | `bash scripts/db.sh check` | the guardrail (also runs automatically) |
+
+There are exactly two environments. **local** is your machine, with
+connection strings in `.env`. **production** is migrated only by CI when a
+change reaches `main`, using secrets on the GitHub Environment `production`.
+Never run anything against production from this machine.
 
 Exit code **3** means "Docker isn't available". It's not an error: follow the
 no-Docker path the message names.
@@ -58,7 +62,7 @@ Run `make db-doctor` and fix whatever it reports:
 | `make not found` | Use the "without make" column from now on. |
 | No Docker, or Docker not running | Fine. Use the no-Docker path (`make db-sync`, CI). Don't ask the user to install anything. |
 | No `origin` remote | Ask for the GitHub repo URL; `git remote add origin <url>`. |
-| `X_DATABASE_URL is not set` | Put it in the env file named in the message. Ask for the value if it isn't a local database. |
+| `X_DATABASE_URL is not set` | Add it to `.env`, using the value from `.env.example`. |
 | `cannot connect` | Show the error; check host, port and credentials with the user. |
 | `FAIL ...` | Fix each named file and line (see Conventions). |
 | no `bash` (plain Windows) | Use Git Bash, which comes with Git for Windows. |
@@ -69,9 +73,8 @@ Classify it:
 
 - **A** New database
 - **B** Change an existing database's schema
-- **C** Apply migrations to an environment (staging, production, ...)
-- **D** Add an environment
-- **E** Status, or a question
+- **C** Get migrations into production
+- **D** Status, or a question
 
 Take everything you can from the user's message and anything they attached or
 pasted: SQL DDL, DrawSQL / dbdiagram / DBML exports, Prisma models, prose.
@@ -140,41 +143,29 @@ End with: *Reply "go" to apply, or tell me what to change.*
    PR: `gh pr create --fill` if `gh` is available. Otherwise give the user the
    compare link, `https://github.com/<owner>/<repo>/compare/<branch>?expand=1`,
    built from `git remote get-url origin`.
-6. **A:** CI needs a `<NAME>_DATABASE_URL` secret on each GitHub Environment
-   it deploys to. Offer to set it with
-   `gh secret set <NAME>_DATABASE_URL --env <env>`; the value comes from the
-   user.
+6. **A:** production needs a `<NAME>_DATABASE_URL` secret on the GitHub
+   Environment `production`. Offer to set it with
+   `gh secret set <NAME>_DATABASE_URL --env production`; the value comes from
+   the user. Without `gh`, give the steps: *Settings -> Environments ->
+   production -> Add secret*.
 
-Merging the PR migrates `DB_PUSH_ENVIRONMENT` automatically.
+Merging the PR migrates production automatically.
 
-## Flow C - Apply to an environment
+## Flow C - Get migrations into production
 
-Only when the user explicitly names the environment, and only from `main`.
+Production is only ever migrated by CI.
 
-- Normally CI does it: `gh workflow run database-migration.yml -f environment=<env>`,
-  then `gh run watch`. Without `gh`, give the one-click path: *Actions ->
-  Database Migration -> Run workflow -> <env>*.
-- From this machine (Docker only): `make db-status ENV=<env>` first, then
-  `DB_CONFIRM=<env> make db-migrate ENV=<env>`. The script refuses non-local
-  environments outside CI unless `DB_CONFIRM` is set.
-
-## Flow D - Add an environment
-
-No branch is needed, because nothing is committed.
-
-1. `make db-new-env ENV=<env>` creates `.env.<env>` (gitignored) with every
-   `*_DATABASE_URL`, for local use.
-2. CI: create the GitHub Environment and its secrets:
-   `gh api -X PUT repos/{owner}/{repo}/environments/<env>`, then
-   `gh secret set <NAME>_DATABASE_URL --env <env>` for each database.
-   Recommend required reviewers on production. Without `gh`, give the exact
-   *Settings -> Environments* steps.
+- Merging to `main` does it automatically.
+- To re-run it, for example after fixing a secret:
+  `gh workflow run database-migration.yml --ref main`. Without `gh`, give
+  the one-click path: *Actions -> Database Migration -> Run workflow ->
+  main*.
 
 ## Finish
 
 Report in at most six lines: branch, files changed, commands run (✓/✗), the
-PR link or compare link, and the next step. Never commit `.env` or
-`.env.<env>`, never commit on `main`, and never use `--no-verify`.
+PR link or compare link, and the next step. Never commit `.env`, never commit
+on `main`, and never use `--no-verify`.
 
 ## Conventions (apply automatically)
 
@@ -213,5 +204,5 @@ or disable a check.
   forward instead.
 - No Prisma, Alembic, Django, Goose or GORM migrations anywhere.
 - Touch only the database the request is about.
-- Credentials live only in `.env` / `.env.<env>` (gitignored) or CI secrets.
+- Credentials live only in `.env` (gitignored) or CI secrets.
 - Don't create new docs. If behaviour changes, update `README.md`.
