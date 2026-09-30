@@ -1,0 +1,71 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: github.repository == 'kunaldoliya90/Migrion'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        run: shellcheck scripts/*.sh .githooks/pre-commit
+
+      - name: Create a database
+        run: |
+          make db-new NAME=demo
+          cat > database/demo/schema.hcl <<'EOF'
+          schema "public" {}
+
+          table "invoices" {
+            schema = schema.public
+            column "id" {
+              type    = uuid
+              default = sql("gen_random_uuid()")
+            }
+            column "is_paid" {
+              type    = boolean
+              default = false
+            }
+            column "created_at" {
+              type    = timestamptz
+              default = sql("now()")
+            }
+            primary_key {
+              columns = [column.id]
+            }
+          }
+          EOF
+
+      - name: Generate and apply a migration
+        run: |
+          make db-migration
+          ls database/demo/migrations/*.sql
+          make db-migrate
+          make db-status
+
+      - name: A second run changes nothing
+        run: |
+          before=$(ls database/demo/migrations)
+          make db-migration
+          [ "$before" = "$(ls database/demo/migrations)" ]
+          make db-migrate
+
+      - name: A destructive change is flagged
+        run: |
+          sed -i '/column "is_paid"/,/^  }/d' database/demo/schema.hcl
+          make db-migration | tee output.txt
+          grep -q WARNING output.txt
+          make db-migrate
+
+      - name: A broken convention fails the check
+        run: |
+          sed -i 's/"created_at"/"createdAt"/' database/demo/schema.hcl
+          ! make db-check
