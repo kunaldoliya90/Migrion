@@ -60,7 +60,7 @@ jobs:
 
       - name: A destructive change is flagged
         run: |
-          sed -i '/column "is_paid"/,/^    }/d' database/demo/schema.hcl
+          sed -i '/column "is_paid"/,/^  }/d' database/demo/schema.hcl
           make db-migration | tee output.txt
           grep -q WARNING output.txt
           make db-migrate
