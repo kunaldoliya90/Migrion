@@ -26,8 +26,10 @@ edit schema.hcl  →  make db-migration  →  pull request  →  merged = in pro
 - **Safe by default.** Conventions are checked on every change. Committed
   migrations can't be edited. Destructive changes need explicit approval, and
   production is only ever migrated by CD.
-- **Small.** A Makefile, two short scripts, two workflows. Easy to read, easy
-  to change.
+- **One-click rollback.** Undo a merged change from the Actions tab; it ships
+  as a new migration through the same pull request flow.
+- **Small.** A Makefile, two short scripts, three workflows. Easy to read,
+  easy to change.
 - **Agent-friendly.** Any AI coding agent can drive it through `AGENTS.md`.
 
 ## Requirements
@@ -165,6 +167,22 @@ taken on your machine, set `POSTGRES_PORT` in `.env`.
 and applies all pending migrations to production. You can also start it from
 the Actions tab.
 
+**Rollback** (`.github/workflows/rollback.yml`) undoes a merged pull request.
+In **Actions → Rollback → Run workflow**, enter the pull request's number. It:
+
+1. reverts that pull request's `schema.hcl` change;
+2. generates a new migration that takes the database back;
+3. opens a pull request `db/<name>/rollback-<number>`, labelled
+   `allow-destructive-migration`;
+4. merges it as soon as CI passes, and CD migrates production.
+
+The database is never rewound: the rollback is a new migration, so `main`
+always matches production. Rolling back often deletes data (undoing an added
+column drops what was written to it), so check what the pull request added
+before you click. The workflow stops if the pull request changed more than
+one database, created a database, or if its `schema.hcl` changed again
+afterwards; roll back the later pull requests first.
+
 ### One-time GitHub setup
 
 1. **Settings → Environments →** create `production`. Add one secret per
@@ -178,6 +196,14 @@ the Actions tab.
    inside it (change `runs-on` in `cd.yml`) or allow GitHub's IP ranges.
 4. **Delete `.github/workflows/test.yml`.** It tests Migrion itself and is
    skipped outside this repository.
+5. **For Rollback:**
+   - Under **Settings → General**, turn on **Allow auto-merge**.
+   - Under **Issues → Labels**, create the label `allow-destructive-migration`.
+   - Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens)
+     for this repository with **Contents** and **Pull requests** set to *Read
+     and write*. Add it as the repository secret `ROLLBACK_TOKEN`. GitHub
+     doesn't run CI or CD for pull requests and merges made with the built-in
+     token, so the workflow needs this one.
 
 ## Conventions
 
@@ -218,8 +244,9 @@ Recommended, but not enforced:
 - **The destructive-change check is a text match** on `DROP`, `TRUNCATE` and
   column type changes. It catches the common cases, not every way to lose
   data, so still read each generated migration.
-- **Migrations run in order, one database at a time.** There is no rollback;
-  a failed migration is fixed forward with a new one.
+- **Migrations run in order, one database at a time.** The database is never
+  rewound: a failed migration is fixed forward with a new one, and Rollback
+  undoes a change with a new migration too.
 - Uses the free Atlas community edition, so Pro-only features such as
   `migrate lint` are not used.
 
@@ -234,7 +261,7 @@ Makefile                      the commands
 scripts/db.sh                 what the commands do
 scripts/check.sh              the conventions check
 .githooks/pre-commit          blocks commits on main
-.github/workflows/            CI and CD
+.github/workflows/            CI, CD and Rollback
 AGENTS.md, .vibe-code/        instructions for AI coding agents
 ```
 

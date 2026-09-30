@@ -1,0 +1,61 @@
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Number of the merged pull request to roll back
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rollback
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    env:
+      # A personal access token, so CI runs on the pull request and CD runs after the merge.
+      GH_TOKEN: ${{ secrets.ROLLBACK_TOKEN }}
+      PR: ${{ inputs.pr }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.ROLLBACK_TOKEN || github.token }}
+
+      - name: Revert the schema change
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "::error::Add the ROLLBACK_TOKEN secret - see the README"; exit 1; }
+          commit=$(gh pr view "$PR" --json mergeCommit --jq '.mergeCommit.oid // empty')
+          [ -n "$commit" ] || { echo "::error::#$PR is not a merged pull request"; exit 1; }
+          schema=$(git diff --name-only "$commit^1" "$commit" -- 'database/*/schema.hcl')
+          [ "$(echo "$schema" | grep -c .)" = 1 ] || { echo "::error::#$PR must change exactly one schema.hcl"; exit 1; }
+          git cat-file -e "$commit^1:$schema" 2>/dev/null || { echo "::error::#$PR created this database; rolling that back is not supported"; exit 1; }
+          git diff "$commit^1" "$commit" -- "$schema" | git apply -R ||
+            { echo "::error::$schema changed after #$PR - roll back the later pull requests first"; exit 1; }
+          echo "DB=$(basename "$(dirname "$schema")")" >> "$GITHUB_ENV"
+
+      - name: Generate the rollback migration
+        run: |
+          make db-migration
+          git ls-files --others --exclude-standard "database/$DB/migrations/*.sql" | grep -q . ||
+            { echo "::error::The database already matches the schema before #$PR - nothing to roll back"; exit 1; }
+
+      - name: Open the pull request and merge it once CI passes
+        run: |
+          branch="db/$DB/rollback-$PR"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add database
+          git commit -m "db($DB): roll back #$PR"
+          git push -u origin "$branch"
+          gh pr create --base main --head "$branch" --label allow-destructive-migration \
+            --title "db($DB): roll back #$PR" \
+            --body "Rolls back #$PR with a new migration. Started by @$GITHUB_ACTOR from the Rollback workflow."
+          gh pr merge "$branch" --auto --merge
