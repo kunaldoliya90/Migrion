@@ -1,6 +1,6 @@
 # Migrion
 
-[![CI](https://github.com/kunaldoliya90/Migrion/actions/workflows/ci.yml/badge.svg)](https://github.com/kunaldoliya90/Migrion/actions/workflows/ci.yml)
+[![Test](https://github.com/kunaldoliya90/Migrion/actions/workflows/test.yml/badge.svg)](https://github.com/kunaldoliya90/Migrion/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **One repository for every microservice's database schema and migrations.**
@@ -190,7 +190,13 @@ afterwards; roll back the later pull requests first.
    to approve each production run.
 2. **Settings → Branches →** protect `main`: require a pull request, and
    require the `verify` status check.
-3. **For Rollback:**
+3. **Network access.** CD runs on GitHub-hosted runners, so they must be able
+   to reach your production databases. If your databases are on a private
+   network, use a [self-hosted runner](https://docs.github.com/actions/hosting-your-own-runners)
+   inside it (change `runs-on` in `cd.yml`) or allow GitHub's IP ranges.
+4. **Delete `.github/workflows/test.yml`.** It tests Migrion itself and is
+   skipped outside this repository.
+5. **For Rollback:**
    - Under **Settings → General**, turn on **Allow auto-merge**.
    - Under **Issues → Labels**, create the label `allow-destructive-migration`.
    - Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens)
@@ -232,6 +238,18 @@ Recommended, but not enforced:
   from `main`, delete its generated migration, and run `make db-migration`
   again.
 
+## Limitations
+
+- **Postgres only**, and only the `public` schema of each database.
+- **The destructive-change check is a text match** on `DROP`, `TRUNCATE` and
+  column type changes. It catches the common cases, not every way to lose
+  data, so still read each generated migration.
+- **Migrations run in order, one database at a time.** The database is never
+  rewound: a failed migration is fixed forward with a new one, and Rollback
+  undoes a change with a new migration too.
+- Uses the free Atlas community edition, so Pro-only features such as
+  `migrate lint` are not used.
+
 ## Project structure
 
 ```
@@ -262,8 +280,13 @@ The agent follows `AGENTS.md` and `.vibe-code/database-change.md`:
 ## Contributing
 
 Issues and pull requests are welcome. Work on a branch (`feat/…`, `fix/…`,
-`docs/…`), keep changes small, and make sure `make db-check` and ShellCheck
-pass.
+`docs/…`) and keep changes small. Every pull request runs `test.yml`, which
+lints the scripts with ShellCheck and runs the full workflow against a
+throwaway database.
+
+To report a security issue, please use
+[GitHub's private vulnerability reporting](https://github.com/kunaldoliya90/Migrion/security/advisories/new)
+instead of opening a public issue.
 
 ## License
 
